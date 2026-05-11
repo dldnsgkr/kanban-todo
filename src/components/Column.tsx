@@ -1,4 +1,5 @@
 import { useDroppable } from '@dnd-kit/core'
+import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { css, cva } from 'styled-system/css'
 import Card from './Card'
 import type { ColumnData, ColumnId, Task } from '../types'
@@ -9,7 +10,6 @@ export const COLUMN_META: Record<ColumnId, { label: string; color: string }> = {
   'done':        { label: '완료',    color: '#10b981' },
 }
 
-// cva: 컬럼 타입 variant + isOver compound variant
 const columnVariants = cva({
   base: {
     bg: 'white',
@@ -94,9 +94,10 @@ interface ColumnProps {
   column: ColumnData
   tasks: Task[]
   onDelete: (id: string) => void
+  onEdit: (task: Task) => void
 }
 
-export default function Column({ column, tasks, onDelete }: ColumnProps) {
+export default function Column({ column, tasks, onDelete, onEdit }: ColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id: column.id })
   const meta = COLUMN_META[column.id]
 
@@ -135,9 +136,11 @@ export default function Column({ column, tasks, onDelete }: ColumnProps) {
       </div>
 
       <div className={listStyle}>
-        {tasks.map(task => (
-          <Card key={task.id} task={task} onDelete={onDelete} />
-        ))}
+        <SortableContext items={column.taskIds} strategy={verticalListSortingStrategy}>
+          {tasks.map(task => (
+            <Card key={task.id} task={task} onDelete={onDelete} onEdit={onEdit} />
+          ))}
+        </SortableContext>
         {tasks.length === 0 && (
           <div
             className={emptyStyle}

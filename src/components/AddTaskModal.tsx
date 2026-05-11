@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { css } from 'styled-system/css'
 import { PRIORITY_CONFIG } from './Card'
-import type { Priority } from '../types'
+import type { Priority, Task } from '../types'
 
 const overlayStyle = css({
   position: 'fixed',
@@ -132,20 +132,22 @@ const submitBtnStyle = css({
   _disabled: { opacity: '0.45', cursor: 'not-allowed' },
 })
 
-// 애니메이션은 CSS keyframes로 전역 정의
 const keyframes = `
   @keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }
   @keyframes slideUp { from { transform: translateY(16px); opacity: 0 } to { transform: translateY(0); opacity: 1 } }
 `
 
 interface AddTaskModalProps {
-  onAdd: (title: string, priority: Priority) => void
+  initialTask?: Task
+  onSave: (title: string, priority: Priority, dueDate?: string) => void
   onClose: () => void
 }
 
-export default function AddTaskModal({ onAdd, onClose }: AddTaskModalProps) {
-  const [title, setTitle] = useState('')
-  const [priority, setPriority] = useState<Priority>('medium')
+export default function AddTaskModal({ initialTask, onSave, onClose }: AddTaskModalProps) {
+  const isEdit = !!initialTask
+  const [title, setTitle] = useState(initialTask?.title ?? '')
+  const [priority, setPriority] = useState<Priority>(initialTask?.priority ?? 'medium')
+  const [dueDate, setDueDate] = useState(initialTask?.dueDate ?? '')
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -162,9 +164,11 @@ export default function AddTaskModal({ onAdd, onClose }: AddTaskModalProps) {
     e.preventDefault()
     const trimmed = title.trim()
     if (!trimmed) return
-    onAdd(trimmed, priority)
+    onSave(trimmed, priority, dueDate || undefined)
     onClose()
   }
+
+  const todayStr = new Date().toISOString().split('T')[0]
 
   return (
     <>
@@ -172,7 +176,7 @@ export default function AddTaskModal({ onAdd, onClose }: AddTaskModalProps) {
       <div className={overlayStyle} onClick={onClose}>
         <div className={modalStyle} onClick={e => e.stopPropagation()}>
           <div className={modalHeaderStyle}>
-            <h2 className={modalTitleStyle}>새 할 일 추가</h2>
+            <h2 className={modalTitleStyle}>{isEdit ? '할 일 수정' : '새 할 일 추가'}</h2>
             <button className={closeBtnStyle} onClick={onClose} aria-label="닫기">×</button>
           </div>
 
@@ -214,9 +218,7 @@ export default function AddTaskModal({ onAdd, onClose }: AddTaskModalProps) {
                           fontWeight: '600',
                           color: isSelected ? cfg.badgeColor : '#64748b',
                           background: isSelected ? cfg.badgeBg : '#f8fafc',
-                          boxShadow: isSelected
-                            ? `0 0 0 2px ${cfg.borderColor}33`
-                            : 'none',
+                          boxShadow: isSelected ? `0 0 0 2px ${cfg.borderColor}33` : 'none',
                           transition: 'all 0.15s',
                         }}
                       >
@@ -244,6 +246,18 @@ export default function AddTaskModal({ onAdd, onClose }: AddTaskModalProps) {
               </div>
             </div>
 
+            <div className={fieldStyle}>
+              <label className={labelStyle} htmlFor="task-due">마감일 (선택)</label>
+              <input
+                id="task-due"
+                className={inputStyle}
+                type="date"
+                value={dueDate}
+                onChange={e => setDueDate(e.target.value)}
+                min={isEdit ? undefined : todayStr}
+              />
+            </div>
+
             <div className={actionsStyle}>
               <button type="button" className={cancelBtnStyle} onClick={onClose}>
                 취소
@@ -253,7 +267,7 @@ export default function AddTaskModal({ onAdd, onClose }: AddTaskModalProps) {
                 className={submitBtnStyle}
                 disabled={!title.trim()}
               >
-                추가하기
+                {isEdit ? '수정하기' : '추가하기'}
               </button>
             </div>
           </form>

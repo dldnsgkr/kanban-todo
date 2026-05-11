@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useRef } from 'react'
 import {
   DndContext,
   DragOverlay,
@@ -8,15 +8,17 @@ import {
   pointerWithin,
   closestCenter,
   type DragStartEvent,
-  type DragEndEvent,
+  type DragOverEvent,
   type CollisionDetection,
 } from '@dnd-kit/core'
+import { arrayMove } from '@dnd-kit/sortable'
 import { css } from 'styled-system/css'
 import Column from './components/Column'
 import { CardOverlay } from './components/Card'
 import AddTaskModal from './components/AddTaskModal'
 import useLocalStorage from './hooks/useLocalStorage'
 import type { BoardState, ColumnId, Priority, Task } from './types'
+import { PRIORITY_CONFIG } from './components/Card'
 
 const COLUMN_ORDER: ColumnId[] = ['todo', 'in-progress', 'done']
 
@@ -37,11 +39,11 @@ const collisionStrategy: CollisionDetection = args => {
   return inner.length > 0 ? inner : closestCenter(args)
 }
 
-// ─── App-level 스타일 ──────────────────────────────────────
 const appStyle = css({
   minH: '100vh',
   display: 'flex',
   flexDirection: 'column',
+  background: '#f8fafc',
 })
 
 const headerStyle = css({
@@ -113,6 +115,56 @@ const addBtnStyle = css({
   _active: { transform: 'translateY(0)' },
 })
 
+const filterBarStyle = css({
+  padding: '12px 32px',
+  display: 'flex',
+  alignItems: 'center',
+  gap: '12px',
+  borderBottom: '1px solid #e2e8f0',
+  background: 'white',
+  flexWrap: 'wrap',
+  mdDown: { padding: '10px 16px' },
+})
+
+const searchInputStyle = css({
+  flex: '1',
+  minW: '140px',
+  maxW: '260px',
+  padding: '7px 12px 7px 34px',
+  border: '1.5px solid #e2e8f0',
+  borderRadius: '8px',
+  fontSize: '13px',
+  color: '#334155',
+  background: '#f8fafc',
+  outline: 'none',
+  transition: 'border-color 0.15s, box-shadow 0.15s',
+  _focus: {
+    borderColor: '#6366f1',
+    background: 'white',
+    boxShadow: '0 0 0 3px rgba(99,102,241,0.12)',
+  },
+  _placeholder: { color: '#94a3b8' },
+})
+
+const searchWrapStyle = css({
+  position: 'relative',
+  display: 'flex',
+  alignItems: 'center',
+})
+
+const searchIconStyle = css({
+  position: 'absolute',
+  left: '10px',
+  color: '#94a3b8',
+  pointerEvents: 'none',
+})
+
+const filterGroupStyle = css({
+  display: 'flex',
+  gap: '6px',
+  flexWrap: 'wrap',
+})
+
 const boardStyle = css({
   flex: '1',
   display: 'grid',
@@ -122,26 +174,51 @@ const boardStyle = css({
   alignItems: 'start',
 })
 
+type PriorityFilter = Priority | 'all'
+
+const PRIORITY_FILTERS: { key: PriorityFilter; label: string }[] = [
+  { key: 'all',    label: '전체' },
+  { key: 'high',   label: '높음' },
+  { key: 'medium', label: '중간' },
+  { key: 'low',    label: '낮음' },
+]
+
 export default function App() {
   const [board, setBoard] = useLocalStorage<BoardState>('kanban-board', INITIAL_STATE)
-  const [isModalOpen, setIsModalOpen] = useState(false)
+  const boardRef = useRef(board)
+  boardRef.current = board
+
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false)
+  const [editingTask, setEditingTask] = useState<Task | null>(null)
   const [activeTask, setActiveTask] = useState<Task | null>(null)
+  const [searchText, setSearchText] = useState('')
+  const [filterPriority, setFilterPriority] = useState<PriorityFilter>('all')
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
   )
 
-  const addTask = useCallback((title: string, priority: Priority) => {
+  const addTask = useCallback((title: string, priority: Priority, dueDate?: string) => {
     const id = `task-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
     setBoard(prev => ({
       ...prev,
       tasks: {
         ...prev.tasks,
-        [id]: { id, title, priority, createdAt: new Date().toISOString() },
+        [id]: { id, title, priority, createdAt: new Date().toISOString(), dueDate },
       },
       columns: {
         ...prev.columns,
         todo: { ...prev.columns.todo, taskIds: [...prev.columns.todo.taskIds, id] },
+      },
+    }))
+  }, [setBoard])
+
+  const editTask = useCallback((id: string, title: string, priority: Priority, dueDate?: string) => {
+    setBoard(prev => ({
+      ...prev,
+      tasks: {
+        ...prev.tasks,
+        [id]: { ...prev.tasks[id], title, priority, dueDate },
       },
     }))
   }, [setBoard])
@@ -162,37 +239,61 @@ export default function App() {
   }, [setBoard])
 
   const handleDragStart = useCallback(({ active }: DragStartEvent) => {
-    setActiveTask(board.tasks[String(active.id)] ?? null)
-  }, [board.tasks])
+    setActiveTask(boardRef.current.tasks[String(active.id)] ?? null)
+  }, [])
 
-  const handleDragEnd = useCallback(({ active, over }: DragEndEvent) => {
-    setActiveTask(null)
+  const handleDragOver = useCallback(({ active, over }: DragOverEvent) => {
     if (!over) return
+    const activeId = String(active.id)
+    const overId = String(over.id)
+    if (activeId === overId) return
 
-    const taskId = String(active.id)
-    const targetColId = String(over.id)
-    if (!isColumnId(targetColId)) return
+    const currentBoard = boardRef.current
+    const activeColId = COLUMN_ORDER.find(id => currentBoard.columns[id].taskIds.includes(activeId))
+    if (!activeColId) return
 
-    const sourceColId = COLUMN_ORDER.find(
-      colId => board.columns[colId].taskIds.includes(taskId),
-    )
-    if (!sourceColId || sourceColId === targetColId) return
+    const overColId = isColumnId(overId)
+      ? overId
+      : COLUMN_ORDER.find(id => currentBoard.columns[id].taskIds.includes(overId))
+    if (!overColId) return
 
-    setBoard(prev => ({
-      ...prev,
-      columns: {
-        ...prev.columns,
-        [sourceColId]: {
-          ...prev.columns[sourceColId],
-          taskIds: prev.columns[sourceColId].taskIds.filter(id => id !== taskId),
-        },
-        [targetColId]: {
-          ...prev.columns[targetColId],
-          taskIds: [...prev.columns[targetColId].taskIds, taskId],
-        },
-      },
-    }))
-  }, [board, setBoard])
+    if (activeColId === overColId) {
+      const taskIds = currentBoard.columns[activeColId].taskIds
+      const oldIndex = taskIds.indexOf(activeId)
+      const newIndex = isColumnId(overId) ? taskIds.length - 1 : taskIds.indexOf(overId)
+      if (oldIndex !== newIndex && newIndex >= 0) {
+        setBoard(prev => ({
+          ...prev,
+          columns: {
+            ...prev.columns,
+            [activeColId]: {
+              ...prev.columns[activeColId],
+              taskIds: arrayMove(prev.columns[activeColId].taskIds, oldIndex, newIndex),
+            },
+          },
+        }))
+      }
+    } else {
+      setBoard(prev => {
+        const sourceTaskIds = prev.columns[activeColId].taskIds.filter(id => id !== activeId)
+        const destTaskIds = [...prev.columns[overColId].taskIds]
+        const overIndex = isColumnId(overId) ? destTaskIds.length : destTaskIds.indexOf(overId)
+        destTaskIds.splice(overIndex < 0 ? destTaskIds.length : overIndex, 0, activeId)
+        return {
+          ...prev,
+          columns: {
+            ...prev.columns,
+            [activeColId]: { ...prev.columns[activeColId], taskIds: sourceTaskIds },
+            [overColId]:   { ...prev.columns[overColId],   taskIds: destTaskIds   },
+          },
+        }
+      })
+    }
+  }, [setBoard])
+
+  const handleDragEnd = useCallback(() => {
+    setActiveTask(null)
+  }, [])
 
   const totalTasks = Object.keys(board.tasks).length
 
@@ -213,23 +314,82 @@ export default function App() {
             <p className={subtitleStyle}>{totalTasks}개의 할 일</p>
           </div>
         </div>
-        <button className={addBtnStyle} onClick={() => setIsModalOpen(true)}>
+        <button className={addBtnStyle} onClick={() => setIsAddModalOpen(true)}>
           <span style={{ fontSize: '18px', fontWeight: '400', lineHeight: 1 }}>+</span>
           할 일 추가
         </button>
       </header>
 
+      <div className={filterBarStyle}>
+        <div className={searchWrapStyle}>
+          <span className={searchIconStyle}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+              <circle cx="11" cy="11" r="8" />
+              <path d="m21 21-4.35-4.35" />
+            </svg>
+          </span>
+          <input
+            className={searchInputStyle}
+            type="text"
+            placeholder="검색..."
+            value={searchText}
+            onChange={e => setSearchText(e.target.value)}
+          />
+        </div>
+
+        <div className={filterGroupStyle}>
+          {PRIORITY_FILTERS.map(({ key, label }) => {
+            const isSelected = filterPriority === key
+            const cfg = key !== 'all' ? PRIORITY_CONFIG[key] : null
+            return (
+              <button
+                key={key}
+                onClick={() => setFilterPriority(key)}
+                style={{
+                  padding: '5px 12px',
+                  borderRadius: '20px',
+                  border: `1.5px solid ${isSelected ? (cfg?.borderColor ?? '#6366f1') : '#e2e8f0'}`,
+                  background: isSelected ? (cfg?.badgeBg ?? '#ede9fe') : '#f8fafc',
+                  color: isSelected ? (cfg?.badgeColor ?? '#4f46e5') : '#64748b',
+                  fontSize: '12px',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  transition: 'all 0.15s',
+                }}
+              >
+                {label}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
       <DndContext
         sensors={sensors}
         collisionDetection={collisionStrategy}
         onDragStart={handleDragStart}
+        onDragOver={handleDragOver}
         onDragEnd={handleDragEnd}
       >
         <main className={boardStyle}>
           {COLUMN_ORDER.map(colId => {
             const col = board.columns[colId]
-            const tasks = col.taskIds.map(id => board.tasks[id]).filter(Boolean) as Task[]
-            return <Column key={colId} column={col} tasks={tasks} onDelete={deleteTask} />
+            const tasks = col.taskIds
+              .map(id => board.tasks[id])
+              .filter((t): t is Task => !!t)
+              .filter(t =>
+                (filterPriority === 'all' || t.priority === filterPriority) &&
+                (!searchText || t.title.toLowerCase().includes(searchText.toLowerCase()))
+              )
+            return (
+              <Column
+                key={colId}
+                column={col}
+                tasks={tasks}
+                onDelete={deleteTask}
+                onEdit={setEditingTask}
+              />
+            )
           })}
         </main>
 
@@ -238,8 +398,22 @@ export default function App() {
         </DragOverlay>
       </DndContext>
 
-      {isModalOpen && (
-        <AddTaskModal onAdd={addTask} onClose={() => setIsModalOpen(false)} />
+      {isAddModalOpen && (
+        <AddTaskModal
+          onSave={(title, priority, dueDate) => addTask(title, priority, dueDate)}
+          onClose={() => setIsAddModalOpen(false)}
+        />
+      )}
+
+      {editingTask && (
+        <AddTaskModal
+          initialTask={editingTask}
+          onSave={(title, priority, dueDate) => {
+            editTask(editingTask.id, title, priority, dueDate)
+            setEditingTask(null)
+          }}
+          onClose={() => setEditingTask(null)}
+        />
       )}
     </div>
   )

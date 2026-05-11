@@ -1,4 +1,5 @@
-import { useDraggable } from '@dnd-kit/core'
+import { useSortable } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import { css, cva } from 'styled-system/css'
 import type { Task, Priority } from '../types'
 
@@ -11,7 +12,6 @@ export const PRIORITY_CONFIG: Record<
   low:    { label: '낮음', borderColor: '#22c55e', badgeBg: '#dcfce7', badgeColor: '#16a34a' },
 }
 
-// cva: 우선순위 variant + overlay 상태를 원자적 클래스로 정의
 const cardVariants = cva({
   base: {
     bg: 'white',
@@ -42,7 +42,6 @@ const cardVariants = cva({
   },
 })
 
-// 모듈 레벨에서 한 번만 계산되는 스타일
 const topRowStyle = css({
   display: 'flex',
   alignItems: 'center',
@@ -58,17 +57,25 @@ const badgeStyle = css({
   letterSpacing: '0.03em',
 })
 
-const deleteBtnStyle = css({
+const actionsBtnGroupStyle = css({
+  display: 'flex',
+  alignItems: 'center',
+  gap: '2px',
+})
+
+const iconBtnStyle = css({
   background: 'none',
   border: 'none',
   color: '#94a3b8',
-  fontSize: '18px',
+  fontSize: '14px',
   lineHeight: '1',
   cursor: 'pointer',
-  padding: '0 2px',
+  padding: '3px 5px',
   borderRadius: '4px',
   transition: 'color 0.15s, background 0.15s',
-  _hover: { color: '#ef4444', background: '#fee2e2' },
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
 })
 
 const titleStyle = css({
@@ -79,26 +86,47 @@ const titleStyle = css({
   wordBreak: 'break-word',
 })
 
+const metaRowStyle = css({
+  display: 'flex',
+  alignItems: 'center',
+  gap: '8px',
+  marginTop: '8px',
+  flexWrap: 'wrap',
+})
+
 const dateStyle = css({
-  display: 'block',
-  marginTop: '6px',
   fontSize: '11px',
   color: '#94a3b8',
 })
 
-// ─── 순수 표시 컴포넌트 ───────────────────────────────────
+function getDueDateInfo(dueDate: string) {
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const due = new Date(dueDate)
+  due.setHours(0, 0, 0, 0)
+  const diffDays = Math.floor((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
+  const formatted = due.toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' })
+
+  if (diffDays < 0) return { label: `${formatted} 마감`, color: '#ef4444', bg: '#fee2e2' }
+  if (diffDays === 0) return { label: '오늘 마감', color: '#ef4444', bg: '#fee2e2' }
+  if (diffDays <= 2) return { label: `${formatted} 마감`, color: '#d97706', bg: '#fef3c7' }
+  return { label: `${formatted} 마감`, color: '#64748b', bg: '#f1f5f9' }
+}
+
 interface CardBodyProps {
   task: Task
   onDelete?: (id: string) => void
+  onEdit?: (task: Task) => void
   isOverlay?: boolean
 }
 
-function CardBody({ task, onDelete, isOverlay = false }: CardBodyProps) {
+function CardBody({ task, onDelete, onEdit, isOverlay = false }: CardBodyProps) {
   const p = PRIORITY_CONFIG[task.priority]
-  const date = new Date(task.createdAt).toLocaleDateString('ko-KR', {
+  const createdDate = new Date(task.createdAt).toLocaleDateString('ko-KR', {
     month: 'short',
     day: 'numeric',
   })
+  const dueInfo = task.dueDate ? getDueDateInfo(task.dueDate) : null
 
   return (
     <div className={cardVariants({ priority: task.priority, isOverlay: isOverlay || undefined })}>
@@ -106,45 +134,102 @@ function CardBody({ task, onDelete, isOverlay = false }: CardBodyProps) {
         <span className={badgeStyle} style={{ background: p.badgeBg, color: p.badgeColor }}>
           {p.label}
         </span>
-        {!isOverlay && onDelete && (
-          <button
-            className={deleteBtnStyle}
-            aria-label="삭제"
-            onPointerDown={e => e.stopPropagation()}
-            onClick={e => { e.stopPropagation(); onDelete(task.id) }}
-          >
-            ×
-          </button>
+        {!isOverlay && (
+          <div className={actionsBtnGroupStyle}>
+            {onEdit && (
+              <button
+                className={iconBtnStyle}
+                aria-label="수정"
+                style={{ color: '#94a3b8' }}
+                onPointerDown={e => e.stopPropagation()}
+                onClick={e => { e.stopPropagation(); onEdit(task) }}
+                onMouseEnter={e => {
+                  ;(e.currentTarget as HTMLButtonElement).style.color = '#6366f1'
+                  ;(e.currentTarget as HTMLButtonElement).style.background = '#ede9fe'
+                }}
+                onMouseLeave={e => {
+                  ;(e.currentTarget as HTMLButtonElement).style.color = '#94a3b8'
+                  ;(e.currentTarget as HTMLButtonElement).style.background = 'none'
+                }}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                </svg>
+              </button>
+            )}
+            {onDelete && (
+              <button
+                className={iconBtnStyle}
+                aria-label="삭제"
+                style={{ fontSize: '18px', color: '#94a3b8' }}
+                onPointerDown={e => e.stopPropagation()}
+                onClick={e => { e.stopPropagation(); onDelete(task.id) }}
+                onMouseEnter={e => {
+                  ;(e.currentTarget as HTMLButtonElement).style.color = '#ef4444'
+                  ;(e.currentTarget as HTMLButtonElement).style.background = '#fee2e2'
+                }}
+                onMouseLeave={e => {
+                  ;(e.currentTarget as HTMLButtonElement).style.color = '#94a3b8'
+                  ;(e.currentTarget as HTMLButtonElement).style.background = 'none'
+                }}
+              >
+                ×
+              </button>
+            )}
+          </div>
         )}
       </div>
+
       <p className={titleStyle}>{task.title}</p>
-      <span className={dateStyle}>{date}</span>
+
+      <div className={metaRowStyle}>
+        <span className={dateStyle}>{createdDate} 생성</span>
+        {dueInfo && (
+          <span
+            style={{
+              fontSize: '11px',
+              fontWeight: '600',
+              padding: '1px 7px',
+              borderRadius: '20px',
+              background: dueInfo.bg,
+              color: dueInfo.color,
+            }}
+          >
+            {dueInfo.label}
+          </span>
+        )}
+      </div>
     </div>
   )
 }
 
-// ─── 드래그 오버레이 전용 ─────────────────────────────────
 export function CardOverlay({ task }: { task: Task }) {
   return <CardBody task={task} isOverlay />
 }
 
-// ─── 실제 드래그 가능한 카드 ──────────────────────────────
 interface CardProps {
   task: Task
   onDelete: (id: string) => void
+  onEdit: (task: Task) => void
 }
 
-export default function Card({ task, onDelete }: CardProps) {
-  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: task.id })
+export default function Card({ task, onDelete, onEdit }: CardProps) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: task.id })
 
   return (
     <div
       ref={setNodeRef}
       {...attributes}
       {...listeners}
-      style={{ opacity: isDragging ? 0.35 : 1, cursor: isDragging ? 'grabbing' : 'grab' }}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.35 : 1,
+        cursor: isDragging ? 'grabbing' : 'grab',
+      }}
     >
-      <CardBody task={task} onDelete={onDelete} />
+      <CardBody task={task} onDelete={onDelete} onEdit={onEdit} />
     </div>
   )
 }

@@ -7,6 +7,7 @@ export interface Task {
   title: string
   priority: Priority
   createdAt: string
+  dueDate?: string
 }
 
 export interface ColumnData {
