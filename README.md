@@ -9,7 +9,7 @@ React + TypeScript로 개발되었으며, GitHub Actions를 통해 AWS S3에 자
 
 > ⚠️ AWS Academy 임시 자격증명을 사용하므로 세션 만료(약 4시간) 후 접속이 불가할 수 있습니다.
 
-**배포 주소:** `<!-- TODO: S3 버킷 URL 입력 -->`
+**배포 주소:** http://mybucket-20263610-276594269232-us-east-1-an.s3-website-us-east-1.amazonaws.com/
 
 ---
 
